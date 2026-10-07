@@ -335,9 +335,9 @@ search_certificates() {
 select_certificate() {
 
     echo
-    echo "============================================================"
-    echo "                    可用 SSL 证书"
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[1;36m%s\033[0m\n' "                    可用 SSL 证书"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
 
     local index=0
 
@@ -348,26 +348,26 @@ select_certificate() {
         index=$((index + 1))
 
         echo
-        echo "[${index}] ${cn}"
-        echo "    SAN      : ${san}"
-        echo "    Issuer   : ${issuer}"
-        echo "    有效期   : ${not_before} -> ${not_after}"
-        echo "    Cert     : ${cert}"
-        echo "    Key      : ${key}"
+        printf '\033[1;36m%s\033[0m\n' "[${index}] ${cn}"
+        printf '\033[0;90m%s\033[0m\n' "    SAN      : ${san}"
+        printf '\033[0;90m%s\033[0m\n' "    Issuer   : ${issuer}"
+        printf '\033[0;90m%s\033[0m\n' "    有效期   : ${not_before} -> ${not_after}"
+        printf '\033[0;90m%s\033[0m\n' "    Cert     : ${cert}"
+        printf '\033[0;90m%s\033[0m\n' "    Key      : ${key}"
 
     done < "$CERT_LIST"
 
     echo
-    echo "============================================================"
-    echo "请输入编号，或者直接输入域名。"
-    echo "例如：1"
-    echo "或者：sys.nl8.eu"
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[1;33m%s\033[0m\n' "请输入编号，或者直接输入域名。"
+    printf '\033[1;33m%s\033[0m\n' "例如：1"
+    printf '\033[1;33m%s\033[0m\n' "或者：sys.nl8.eu"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
 
     local choice
     local selected
 
-    read -r -p "请选择证书: " choice
+    read -r -p $'\033[1;33m请选择证书: \033[0m' choice
 
     [[ -n "$choice" ]] ||
         die "没有输入选择。"
@@ -419,15 +419,15 @@ select_certificate() {
     KEY_DST="${NGINX_SSL_ROOT}/${DOMAIN}/privkey.pem"
 
     echo
-    echo "============================================================"
-    echo "                    已选择证书"
-    echo "============================================================"
-    echo "域名       : ${DOMAIN}"
-    echo "证书来源   : ${CERT_SRC}"
-    echo "私钥来源   : ${KEY_SRC}"
-    echo "Nginx证书  : ${CERT_DST}"
-    echo "Nginx私钥  : ${KEY_DST}"
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[1;36m%s\033[0m\n' "                    已选择证书"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[0;37m%s\033[0m\n' "域名       : ${DOMAIN}"
+    printf '\033[0;90m%s\033[0m\n' "证书来源   : ${CERT_SRC}"
+    printf '\033[0;90m%s\033[0m\n' "私钥来源   : ${KEY_SRC}"
+    printf '\033[0;90m%s\033[0m\n' "Nginx证书  : ${CERT_DST}"
+    printf '\033[0;90m%s\033[0m\n' "Nginx私钥  : ${KEY_DST}"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
     echo
 }
 
@@ -882,37 +882,37 @@ TIMER_EOF
 show_result() {
 
     echo
-    echo "============================================================"
-    echo "                    部署完成"
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[1;32m%s\033[0m\n' "                    部署完成"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
     echo
-    echo "系统："
-    echo "  ${OS_NAME}"
+    printf '\033[0;90m%s\033[0m\n' "系统："
+    printf '\033[0;37m%s\033[0m\n' "  ${OS_NAME}"
     echo
-    echo "域名："
-    echo "  ${DOMAIN}"
+    printf '\033[0;90m%s\033[0m\n' "域名："
+    printf '\033[0;37m%s\033[0m\n' "  ${DOMAIN}"
     echo
-    echo "证书来源："
-    echo "  ${CERT_SRC}"
+    printf '\033[0;90m%s\033[0m\n' "证书来源："
+    printf '\033[0;37m%s\033[0m\n' "  ${CERT_SRC}"
     echo
-    echo "Nginx 证书："
-    echo "  ${CERT_DST}"
+    printf '\033[0;90m%s\033[0m\n' "Nginx 证书："
+    printf '\033[0;37m%s\033[0m\n' "  ${CERT_DST}"
     echo
-    echo "节点文件："
-    echo "  ${NODE_FILE}"
+    printf '\033[0;90m%s\033[0m\n' "节点文件："
+    printf '\033[0;37m%s\033[0m\n' "  ${NODE_FILE}"
     echo
-    echo "本地 API："
-    echo "  http://127.0.0.1:${API_PORT}/subs"
+    printf '\033[0;90m%s\033[0m\n' "本地 API："
+    printf '\033[1;34m%s\033[0m\n' "  http://127.0.0.1:${API_PORT}/subs"
     echo
-    echo "v2rayN 订阅地址："
-    echo "  https://${DOMAIN}/subs"
+    printf '\033[1;36m%s\033[0m\n' "v2rayN 订阅地址："
+    printf '\033[1;34m%s\033[0m\n' "  https://${DOMAIN}/subs"
     echo
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
     echo
-    echo "以后修改："
-    echo "  ${NODE_FILE}"
+    printf '\033[0;90m%s\033[0m\n' "以后修改："
+    printf '\033[0;37m%s\033[0m\n' "  ${NODE_FILE}"
     echo
-    echo "修改节点后，v2rayN 直接刷新订阅即可。"
+    printf '\033[1;33m%s\033[0m\n' "修改节点后，v2rayN 直接刷新订阅即可。"
     echo
 }
 
@@ -923,9 +923,9 @@ show_result() {
 main() {
 
     echo
-    echo "============================================================"
-    echo "       VPS Node Subscription API Installer V2"
-    echo "============================================================"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
+    printf '\033[1;36m%s\033[0m\n' "       VPS Node Subscription API Installer V2"
+    printf '\033[0;90m%s\033[0m\n' "============================================================"
     echo
 
     check_root

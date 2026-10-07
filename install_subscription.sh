@@ -39,7 +39,7 @@ warn() {
 }
 
 die() {
-    echo -e "\033[1;31m[ERROR]\033[0m $*" >&2
+    echo -e "\033[1;35m[ERROR]\033[0m $*" >&2
     exit 1
 }
 
@@ -318,6 +318,32 @@ search_certificates() {
         sort -u "$CERT_LIST" -o "$CERT_LIST"
     fi
 
+    # 按叶证书指纹合并，优先使用 /root/cert/ 中的来源。
+    python3 - "$CERT_LIST" <<'PY_GROUP'
+import csv
+import subprocess
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+groups = {}
+for row in csv.reader(path.read_text().splitlines(), delimiter="\t"):
+    fingerprint = subprocess.check_output(
+        ["openssl", "x509", "-in", row[2], "-noout", "-fingerprint", "-sha256"],
+        text=True).strip()
+    groups.setdefault(fingerprint, []).append(row)
+selected = []
+locations = []
+for index, rows in enumerate(groups.values(), 1):
+    rows.sort(key=lambda row: (not row[2].startswith("/root/cert/"), row[2]))
+    selected.append(rows[0])
+    for row in rows:
+        locations.append([str(index), row[2], row[3]])
+with path.open("w") as stream:
+    csv.writer(stream, delimiter="\t", lineterminator="\n").writerows(selected)
+with Path(str(path) + ".locations").open("w") as stream:
+    csv.writer(stream, delimiter="\t", lineterminator="\n").writerows(locations)
+PY_GROUP
+
     local count
     count="$(wc -l < "$CERT_LIST" | tr -d ' ')"
 
@@ -339,23 +365,46 @@ select_certificate() {
     printf '\033[1;36m%s\033[0m\n' "                    可用 SSL 证书"
     printf '\033[0;90m%s\033[0m\n' "============================================================"
 
-    local index=0
-
-    while IFS=$'\t' read -r \
-        cn san cert key issuer not_before not_after
-    do
-
-        index=$((index + 1))
-
-        echo
-        printf '\033[1;36m%s\033[0m\n' "[${index}] ${cn}"
-        printf '\033[0;90m%s\033[0m\n' "    SAN      : ${san}"
-        printf '\033[0;90m%s\033[0m\n' "    Issuer   : ${issuer}"
-        printf '\033[0;90m%s\033[0m\n' "    有效期   : ${not_before} -> ${not_after}"
-        printf '\033[0;90m%s\033[0m\n' "    Cert     : ${cert}"
-        printf '\033[0;90m%s\033[0m\n' "    Key      : ${key}"
-
-    done < "$CERT_LIST"
+    local terminal_width
+    terminal_width="${COLUMNS:-$(tput cols 2>/dev/null || printf '80')}"
+    python3 - "$CERT_LIST" "$terminal_width" <<'PY_DISPLAY'
+import csv
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    terminal_width = int(sys.argv[2])
+except ValueError:
+    terminal_width = 80
+rows = list(csv.reader(path.read_text().splitlines(), delimiter="\t"))
+locations = list(csv.reader(Path(str(path) + ".locations").read_text().splitlines(), delimiter="\t"))
+def colored(text, code):
+    return f"\033[{code}m{text}\033[0m"
+for index, row in enumerate(rows, 1):
+    cn, san, cert, key, issuer, start, end = row
+    print()
+    print(colored(f"[{index}] {cn}", "1;36"))
+    print(f"    SAN      : {san}")
+    print(f"    Issuer   : {issuer}")
+    print(f"    有效期   : {start} -> {end}")
+    paths = [(entry[1], entry[2]) for entry in locations if entry[0] == str(index)]
+    headings = ["原始路径（优先来源）"] + [f"复制到的路径 {i}" for i in range(1, len(paths))]
+    widths = [max(len(cert), len(key), len(title) * 2) + 3
+              for (cert, key), title in zip(paths, headings)]
+    print()
+    if 13 + sum(widths) <= terminal_width:
+        print("             " + "".join(colored(title + " " * (width - len(title) * 2), "1;36")
+                                       for title, width in zip(headings, widths)))
+        for label, position in [("Cert", 0), ("Key", 1)]:
+            print(f"    {label:<8} " + "".join(pair[position].ljust(width)
+                                               for pair, width in zip(paths, widths)))
+    else:
+        for title, (cert, key) in zip(headings, paths):
+            print(colored(f"    {title}", "1;36"))
+            print(f"    Cert     : {cert}")
+            print(f"    Key      : {key}")
+            print()
+PY_DISPLAY
 
     echo
     printf '\033[0;90m%s\033[0m\n' "============================================================"

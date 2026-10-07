@@ -35,7 +35,7 @@ success() {
 }
 
 warn() {
-    echo -e "\033[1;35m[WARN]\033[0m $*"
+    echo -e "\033[38;5;120m[WARN]\033[0m $*"
 }
 
 die() {
@@ -156,7 +156,7 @@ install_dependencies() {
 search_certificates() {
     info "正在搜索 SSL 证书..."
     local extra_dirs
-    read -r -p $'\033[1;35m额外扫描目录（多个用冒号分隔，回车使用默认）：\033[0m' extra_dirs
+    read -r -p $'\033[38;5;120m额外扫描目录（多个用冒号分隔，回车使用默认）：\033[0m' extra_dirs
     python3 - "$CERT_LIST" "$extra_dirs" <<'PY_SCAN'
 import csv
 import os
@@ -249,6 +249,15 @@ for index, rows in enumerate(groups.values(), 1):
                              0 if "/letsencrypt/live/" in r[2] else 1,
                              0 if Path(r[2]).name.startswith("fullchain") else 1,
                              file_time(Path(r[2])), r[2]))
+    # 同目录同私钥的单证书/完整链只显示优先完整链的一项。
+    unique_rows = []
+    seen_locations = set()
+    for row in rows:
+        location = (str(Path(row[2]).parent), row[3])
+        if location not in seen_locations:
+            seen_locations.add(location)
+            unique_rows.append(row)
+    rows = unique_rows
     selected.append(rows[0])
     for position, row in enumerate(rows):
         label = source(Path(row[2])) if position == 0 else ""
@@ -305,34 +314,45 @@ for index, row in enumerate(rows, 1):
     headings = [entry[3] for entry in locations if entry[0] == str(index)]
     def cells(text):
         return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
-    widths = [max(cells(cert), cells(key), cells(title)) + 3
-              for (cert, key), title in zip(paths, headings)]
-    print()
-    if 13 + sum(widths) <= terminal_width:
-        print("             " + "".join(colored(title + " " * (width - cells(title)), "1;36")
-                                       for title, width in zip(headings, widths)))
-        for label, position in [("Cert", 0), ("Key", 1)]:
-            print(f"    {label:<8} " + "".join(pair[position] + " " * (width - cells(pair[position]))
-                                               for pair, width in zip(paths, widths)))
-    else:
-        for title, (cert, key) in zip(headings, paths):
-            print(colored(f"    {title}", "1;36"))
-            print(f"    Cert     : {cert}")
-            print(f"    Key      : {key}")
-            print()
+    def wrap_cells(text, limit):
+        parts, current, used = [], "", 0
+        for char in text:
+            size = cells(char)
+            if current and used + size > limit:
+                parts.append(current)
+                current, used = "", 0
+            current += char
+            used += size
+        parts.append(current)
+        return parts
+    # 两列分组，长路径在各自列内折行，避免整体退回纵排。
+    column_width = max(24, (terminal_width - 7) // 2)
+    for offset in range(0, len(paths), 2):
+        group = paths[offset:offset + 2]
+        titles = headings[offset:offset + 2]
+        print()
+        for values, color in [(titles, "1;36"),
+                              (["Cert : " + pair[0] for pair in group], "0;37"),
+                              (["Key  : " + pair[1] for pair in group], "0;37")]:
+            wrapped = [wrap_cells(value, column_width) for value in values]
+            for line in range(max(map(len, wrapped))):
+                columns = [parts[line] if line < len(parts) else "" for parts in wrapped]
+                print("    " + "   ".join(colored(value + " " * (column_width - cells(value)), color)
+                                         for value in columns).rstrip())
+
 PY_DISPLAY
 
     echo
     printf '\033[0;90m%s\033[0m\n' "============================================================"
-    printf '\033[1;35m%s\033[0m\n' "请输入编号，或者直接输入域名。"
-    printf '\033[1;35m%s\033[0m\n' "例如：1"
-    printf '\033[1;35m%s\033[0m\n' "或者：sys.nl8.eu"
+    printf '\033[38;5;120m%s\033[0m\n' "请输入编号，或者直接输入域名。"
+    printf '\033[38;5;120m%s\033[0m\n' "例如：1"
+    printf '\033[38;5;120m%s\033[0m\n' "或者：sys.nl8.eu"
     printf '\033[0;90m%s\033[0m\n' "============================================================"
 
     local choice
     local selected
 
-    read -r -p $'\033[1;35m请选择证书: \033[0m' choice
+    read -r -p $'\033[38;5;120m请选择证书: \033[0m' choice
 
     [[ -n "$choice" ]] ||
         die "没有输入选择。"
@@ -862,12 +882,12 @@ show_result() {
     printf '\033[0;90m%s\033[0m\n' '  ──────────────────────────────────────────'
     printf '\033[1;36m%s\033[0m\n' '  v2rayN 订阅地址 · 可直接复制'
     echo
-    printf '\033[1;34m%s\033[0m\n' "https://${DOMAIN}/subs"
+    printf '  \033[1;34m%s\033[0m\n' "https://${DOMAIN}/subs"
     echo
     printf '\033[0;90m%s\033[0m\n' '  ──────────────────────────────────────────'
-    printf '\033[1;35m%s\033[0m\n' '  以后修改节点文件：'
+    printf '\033[38;5;120m%s\033[0m\n' '  以后修改节点文件：'
     printf '  \033[0;37m%s\033[0m\n' "${NODE_FILE}"
-    printf '\033[1;35m%s\033[0m\n' '  保存后，在 v2rayN 中刷新订阅即可。'
+    printf '\033[38;5;120m%s\033[0m\n' '  保存后，在 v2rayN 中刷新订阅即可。'
     echo
 }
 

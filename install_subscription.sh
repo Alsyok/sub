@@ -9,7 +9,7 @@ set -Eeuo pipefail
 APP_NAME="subscription-api"
 API_SCRIPT="/root/subscription_api.py"
 API_PORT="8765"
-NODE_FILE="/root/singbox_nodes.txt"
+NODE_FILE="/etc/nodes/subscription.txt"
 
 NGINX_SSL_ROOT="/etc/nginx/ssl"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
@@ -449,18 +449,14 @@ install_certificate() {
 
 prepare_node_file() {
 
+    mkdir -p "$(dirname "$NODE_FILE")"
+    chmod 700 "$(dirname "$NODE_FILE")"
+
     if [[ ! -f "$NODE_FILE" ]]; then
 
         warn "未找到 ${NODE_FILE}"
 
-        cat > "$NODE_FILE" <<'NODE_EOF'
-# VPS 节点订阅
-# 每行一个节点链接
-#
-# 示例：
-# vless://...
-# hysteria2://...
-NODE_EOF
+        : > "$NODE_FILE"
 
         chmod 600 "$NODE_FILE"
 
@@ -489,7 +485,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import base64
 
-NODE_FILE = Path("/root/singbox_nodes.txt")
+NODE_FILE = Path("/etc/nodes/subscription.txt")
 HOST = "127.0.0.1"
 PORT = 8765
 

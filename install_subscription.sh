@@ -39,7 +39,7 @@ warn() {
 }
 
 die() {
-    echo -e "\033[1;35m[ERROR]\033[0m $*" >&2
+    echo -e "\033[38;5;120m[ERROR]\033[0m $*" >&2
     exit 1
 }
 
@@ -154,204 +154,117 @@ install_dependencies() {
 # ============================================================
 
 search_certificates() {
-
     info "正在搜索 SSL 证书..."
-
-    : > "$CERT_LIST"
-
-    local cert
-    local key
-    local cn
-    local san
-    local issuer
-    local not_before
-    local not_after
-
-    while IFS= read -r cert; do
-
-        [[ -f "$cert" ]] || continue
-
-        if ! openssl x509 \
-            -in "$cert" \
-            -noout >/dev/null 2>&1
-        then
-            continue
-        fi
-
-        cn="$(
-            openssl x509 \
-                -in "$cert" \
-                -noout \
-                -subject 2>/dev/null |
-            sed -n 's/.*CN[[:space:]]*=[[:space:]]*//p' |
-            sed 's/,.*//' |
-            sed 's/^[[:space:]]*//;s/[[:space:]]*$//' ||
-            true
-        )"
-
-        [[ -n "$cn" ]] || continue
-
-        san="$(
-            openssl x509 \
-                -in "$cert" \
-                -noout \
-                -ext subjectAltName 2>/dev/null |
-            grep -oE 'DNS:[^, ]+' |
-            sed 's/^DNS://' |
-            paste -sd ',' - ||
-            true
-        )"
-
-        issuer="$(
-            openssl x509 \
-                -in "$cert" \
-                -noout \
-                -issuer 2>/dev/null |
-            sed 's/^issuer=//' ||
-            true
-        )"
-
-        not_before="$(
-            openssl x509 \
-                -in "$cert" \
-                -noout \
-                -startdate 2>/dev/null |
-            cut -d= -f2 ||
-            true
-        )"
-
-        not_after="$(
-            openssl x509 \
-                -in "$cert" \
-                -noout \
-                -enddate 2>/dev/null |
-            cut -d= -f2 ||
-            true
-        )"
-
-        key=""
-
-        for candidate in \
-            "$(dirname "$cert")/privkey.pem" \
-            "$(dirname "$cert")/key.pem" \
-            "$(dirname "$cert")/private.key" \
-            "$(dirname "$cert")/privkey.key"
-        do
-
-            if [[ -f "$candidate" ]]; then
-
-                if openssl pkey \
-                    -in "$candidate" \
-                    -noout >/dev/null 2>&1
-                then
-                    key="$candidate"
-                    break
-                fi
-
-            fi
-
-        done
-
-        [[ -n "$key" ]] || continue
-
-        # ====================================================
-        # 验证证书和私钥是否匹配
-        # ====================================================
-
-        cert_pub="$(
-            openssl x509 \
-                -in "$cert" \
-                -pubkey \
-                -noout 2>/dev/null |
-            openssl pkey \
-                -pubin \
-                -outform DER 2>/dev/null |
-            sha256sum |
-            awk '{print $1}' ||
-            true
-        )"
-
-        key_pub="$(
-            openssl pkey \
-                -in "$key" \
-                -pubout 2>/dev/null |
-            openssl pkey \
-                -pubin \
-                -outform DER 2>/dev/null |
-            sha256sum |
-            awk '{print $1}' ||
-            true
-        )"
-
-        [[ -n "$cert_pub" ]] || continue
-        [[ -n "$key_pub" ]] || continue
-        [[ "$cert_pub" == "$key_pub" ]] || continue
-
-        printf '%s	%s	%s	%s	%s	%s	%s
-' \
-            "$cn" \
-            "$san" \
-            "$cert" \
-            "$key" \
-            "$issuer" \
-            "$not_before" \
-            "$not_after" \
-            >> "$CERT_LIST"
-
-    done < <(
-        find \
-            /root \
-            /etc \
-            /usr/local \
-            /opt \
-            -type f \
-            \( \
-                -name "fullchain.pem" \
-                -o -name "cert.pem" \
-                -o -name "*.crt" \
-            \) \
-            2>/dev/null |
-        sort -u
-    )
-
-    if [[ -s "$CERT_LIST" ]]; then
-        sort -u "$CERT_LIST" -o "$CERT_LIST"
-    fi
-
-    # 按叶证书指纹合并，优先使用 /root/cert/ 中的来源。
-    python3 - "$CERT_LIST" <<'PY_GROUP'
+    local extra_dirs
+    read -r -p $'\033[1;35m额外扫描目录（多个用冒号分隔，回车使用默认）：\033[0m' extra_dirs
+    python3 - "$CERT_LIST" "$extra_dirs" <<'PY_SCAN'
 import csv
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
-path = Path(sys.argv[1])
+
+def run(args):
+    try:
+        return subprocess.check_output(["openssl", *args], stderr=subprocess.DEVNULL,
+                                       timeout=5, stdin=subprocess.DEVNULL)
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+def public_key(path, certificate=False):
+    args = ["x509", "-in", str(path), "-pubkey", "-noout"] if certificate else ["pkey", "-in", str(path), "-pubout", "-passin", "pass:"]
+    return run(args)
+
+def source(path):
+    text = str(path)
+    if "/.acme.sh/" in text:
+        return "申请来源：acme.sh"
+    if "/letsencrypt/live/" in text or "/letsencrypt/archive/" in text:
+        return "申请来源：Certbot"
+    if "/certificates/" in text and ("/.lego/" in text or path.with_suffix(".json").is_file()):
+        return "申请来源：lego"
+    return ""
+
+def file_time(path):
+    try:
+        birth = subprocess.check_output(["stat", "-c", "%W", str(path)], stderr=subprocess.DEVNULL, timeout=3).strip()
+        if int(birth) > 0:
+            return int(birth)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        pass
+    return path.stat().st_mtime
+
+roots = ["/root", "/home", "/etc", "/usr/local", "/opt", "/var/lib", "/var/www"]
+roots += [part for part in sys.argv[2].split(":") if part]
+files = set()
+for root in roots:
+    for directory, dirs, names in os.walk(root, followlinks=False):
+        dirs[:] = [name for name in dirs if name not in (".git", "node_modules", ".cache")]
+        for name in names:
+            if Path(name).suffix.lower() in (".pem", ".cer", ".crt", ".key"):
+                path = Path(directory) / name
+                if path.is_file():
+                    files.add(path)
+keys = {}
+certificates = []
+for path in sorted(files):
+    try:
+        head = path.open("rb").read(4096)
+    except OSError:
+        continue
+    if b"PRIVATE KEY-----" in head:
+        pub = public_key(path)
+        if pub:
+            keys.setdefault(pub, []).append(path)
+    if b"BEGIN CERTIFICATE" in head:
+        certificates.append(path)
 groups = {}
-for row in csv.reader(path.read_text().splitlines(), delimiter="\t"):
-    fingerprint = subprocess.check_output(
-        ["openssl", "x509", "-in", row[2], "-noout", "-fingerprint", "-sha256"],
-        text=True).strip()
+for cert in certificates:
+    pub = public_key(cert, True)
+    candidates = keys.get(pub, [])
+    if not candidates:
+        continue
+    key = min(candidates, key=lambda p: (p.parent != cert.parent, str(p)))
+    metadata = run(["x509", "-in", str(cert), "-noout", "-subject", "-issuer", "-startdate", "-enddate", "-fingerprint", "-sha256", "-ext", "subjectAltName"])
+    if not metadata:
+        continue
+    text = metadata.decode(errors="replace")
+    cn = re.search(r"\bCN\s*=\s*([^,\n]+)", text)
+    sans = re.findall(r"DNS:([^,\s]+)", text)
+    domain = cn.group(1).strip() if cn else (sans[0] if sans else "")
+    if not domain:
+        continue
+    def field(prefix):
+        return next((line.split("=", 1)[1] for line in text.splitlines() if line.startswith(prefix + "=")), "")
+    fingerprint = next((line for line in text.splitlines() if "Fingerprint=" in line), "")
+    if not fingerprint:
+        continue
+    row = [domain, ",".join(sans), str(cert), str(key), field("issuer"), field("notBefore"), field("notAfter")]
     groups.setdefault(fingerprint, []).append(row)
-selected = []
-locations = []
+selected, locations = [], []
 for index, rows in enumerate(groups.values(), 1):
-    rows.sort(key=lambda row: (not row[2].startswith("/root/cert/"), row[2]))
+    # 识别工具目录；同目录优先完整证书链，未知目录按文件时间排序。
+    rows.sort(key=lambda r: ({"申请来源：acme.sh": 0, "申请来源：Certbot": 1, "申请来源：lego": 2}.get(source(Path(r[2])), 3),
+                             0 if "/letsencrypt/live/" in r[2] else 1,
+                             0 if Path(r[2]).name.startswith("fullchain") else 1,
+                             file_time(Path(r[2])), r[2]))
     selected.append(rows[0])
-    for row in rows:
-        locations.append([str(index), row[2], row[3]])
+    for position, row in enumerate(rows):
+        label = source(Path(row[2])) if position == 0 else ""
+        if not label:
+            label = "可能来源（时间辅助）" if position == 0 else f"保存位置 {position}"
+        locations.append([str(index), row[2], row[3], label])
+path = Path(sys.argv[1])
 with path.open("w") as stream:
     csv.writer(stream, delimiter="\t", lineterminator="\n").writerows(selected)
 with Path(str(path) + ".locations").open("w") as stream:
     csv.writer(stream, delimiter="\t", lineterminator="\n").writerows(locations)
-PY_GROUP
-
+PY_SCAN
     local count
     count="$(wc -l < "$CERT_LIST" | tr -d ' ')"
-
-    if [[ "$count" -eq 0 ]]; then
-        die "没有找到证书和匹配私钥。"
-    fi
-
-    success "发现 ${count} 个可用证书。"
+    [[ "$count" -gt 0 ]] || die "没有找到证书和匹配私钥。"
+    success "发现 ${count} 个可用证书（相同证书已合并）。"
 }
 
 # ============================================================
@@ -370,6 +283,7 @@ select_certificate() {
     python3 - "$CERT_LIST" "$terminal_width" <<'PY_DISPLAY'
 import csv
 import sys
+import unicodedata
 from pathlib import Path
 path = Path(sys.argv[1])
 try:
@@ -388,15 +302,17 @@ for index, row in enumerate(rows, 1):
     print(f"    Issuer   : {issuer}")
     print(f"    有效期   : {start} -> {end}")
     paths = [(entry[1], entry[2]) for entry in locations if entry[0] == str(index)]
-    headings = ["原始路径（优先来源）"] + [f"复制到的路径 {i}" for i in range(1, len(paths))]
-    widths = [max(len(cert), len(key), len(title) * 2) + 3
+    headings = [entry[3] for entry in locations if entry[0] == str(index)]
+    def cells(text):
+        return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
+    widths = [max(cells(cert), cells(key), cells(title)) + 3
               for (cert, key), title in zip(paths, headings)]
     print()
     if 13 + sum(widths) <= terminal_width:
-        print("             " + "".join(colored(title + " " * (width - len(title) * 2), "1;36")
+        print("             " + "".join(colored(title + " " * (width - cells(title)), "1;36")
                                        for title, width in zip(headings, widths)))
         for label, position in [("Cert", 0), ("Key", 1)]:
-            print(f"    {label:<8} " + "".join(pair[position].ljust(width)
+            print(f"    {label:<8} " + "".join(pair[position] + " " * (width - cells(pair[position]))
                                                for pair, width in zip(paths, widths)))
     else:
         for title, (cert, key) in zip(headings, paths):
